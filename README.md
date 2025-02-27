@@ -16,7 +16,7 @@ UPPC-Tools ("musual HPC tools") is a lightweight collection of handy Bash script
 
 1. Clone this repository:
     `git clone https://github.com/jpers1/uhpc-tools.git`
-    cd uhpc-tools
+    cl uhpc-tools
 
 2. Run the installation script (it will copy scripts to `~/.local/bin`):
     `./install.sh --user`
@@ -27,13 +27,14 @@ UPPC-Tools ("musual HPC tools") is a lightweight collection of handy Bash script
 ***Option 2: System-Wide Installation**
 
 1. Clone this repository:
-    `git clone https://github.com/YOUR_USERNAME/uhpc-tools.git`
-    cl uhpc-tools
+    `git clone https://github.com/jpers1/uhpc-tools.git`
+    cd uhpc-tools
 
 2. Run the installation script with `sudo` :
     `sudo ./install.sh --system`
-
-By default, it installs into `/usr/local/bin`. You can customize paths inside `install.sh` if needed.
+By default, it installs into 
+	`/usr/local/bin` 
+You can customize paths inside `install.sh` if needed.
 
 
 ## Usage Examples
@@ -63,4 +64,4 @@ uhpc-multipush /dev/shm/mydata_local.dat /dev/shm/mydata_remote.dat wn208,wn209
 
 ## License
 
-See the [LICENSE] (LICENSE)file for details on usage terms. Contributions and issues are welcome!
+See the [LICENSE](LICENSE) file for details on usage terms. Contributions and issues are welcome!
