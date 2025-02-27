@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#
+# uhpc-cloud-umount
+# A script to unmount an rclone FUSE mount from HPC in unprivileged mode.
+# Part of UHPC-Tools.
+
+set -euo pipefail
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <MOUNTPOINT> [--cache-dir /some/dir]
+
+Example:
+  uhpc-cloud-umount /dev/shm/my_mount --cache-dir /dev/shm/rclone_cache_\${USER}
+
+If --cache-dir is omitted, it defaults to /dev/shm/rclone_cache_\${USER}.
+
+EOF
+  exit 1
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+fi
+
+MOUNTPOINT="$1"
+shift
+
+CACHE_DIR="/dev/shm/rclone_cache_${USER}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cache-dir)
+      CACHE_DIR="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      usage
+      ;;
+  esac
+done
+
+# 1. Check if MOUNTPOINT is actually mounted by rclone
+if ! mount | grep -q "on $MOUNTPOINT type fuse.rclone"; then
+  echo "ERROR: $MOUNTPOINT doesn't seem to be an rclone mount."
+  exit 1
+fi
+
+echo "Unmounting rclone mount at $MOUNTPOINT..."
+fusermount -u "$MOUNTPOINT" || {
+  echo "ERROR: Failed to fusermount -u."
+  exit 1
+}
+
+# 2. Remove the cache directory if it exists
+if [[ -d "$CACHE_DIR" ]]; then
+  echo "Removing cache directory: $CACHE_DIR"
+  rm -rf "$CACHE_DIR"
+fi
+
+echo "uhpc-cloud-umount: Successfully unmounted $MOUNTPOINT."

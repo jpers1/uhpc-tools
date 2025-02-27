@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# uhpc-cloud-mount
+# A script to mount rclone cloud storage on HPC in unprivileged mode.
+# Part of UHPC-Tools.
+
+set -euo pipefail
+
+# Usage message
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <REMOTE:PATH> <MOUNTPOINT> [--cache-dir /some/dir] [--vfs-cache-mode mode]
+
+Example:
+  uhpc-cloud-mount onedrive_remote:MyData /dev/shm/my_mount
+
+Default behaviors:
+  - If --cache-dir is not specified, uses /dev/shm/rclone_cache_\${USER}.
+  - If --vfs-cache-mode is not specified, uses "writes".
+  - The script runs the rclone mount in background automatically.
+
+EOF
+  exit 1
+}
+
+# Check arguments
+if [[ $# -lt 2 ]]; then
+  usage
+fi
+
+REMOTE_PATH="$1"
+MOUNTPOINT="$2"
+shift 2
+
+# Default options
+CACHE_DIR="/dev/shm/rclone_cache_${USER}"
+VFS_MODE="writes"
+
+# Parse optional arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cache-dir)
+      CACHE_DIR="$2"
+      shift 2
+      ;;
+    --vfs-cache-mode)
+      VFS_MODE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      usage
+      ;;
+  esac
+done
+
+# 1. Check if rclone is already running for this user
+if pgrep -u "$USER" rclone >/dev/null 2>&1; then
+  echo "ERROR: rclone is already running for user $USER. Aborting."
+  exit 1
+fi
+
+# 2. Ensure MOUNTPOINT directory exists (don't remove it!)
+if [[ ! -d "$MOUNTPOINT" ]]; then
+  echo "Creating mountpoint directory: $MOUNTPOINT"
+  mkdir -p "$MOUNTPOINT"
+fi
+
+# 3. Prepare the cache directory (remove if exists)
+if [[ -d "$CACHE_DIR" ]]; then
+  echo "Removing existing cache directory: $CACHE_DIR"
+  rm -rf "$CACHE_DIR"
+fi
+
+mkdir -p "$CACHE_DIR"
+
+# 4. Use fusermount if fusermount3 is not available
+export RCLONE_FUSE_COMMAND="${RCLONE_FUSE_COMMAND:-fusermount}"
+
+# 5. Daemonize rclone mount using '&' plus a small trick to keep logs in a file
+# We also add -vv for debug logs, but you can customize the verbosity or log file.
+
+LOGFILE="${CACHE_DIR}/rclone_mount.log"
+echo "Starting rclone mount in background..."
+rclone mount "$REMOTE_PATH" "$MOUNTPOINT" \
+  --cache-dir "$CACHE_DIR" \
+  --vfs-cache-mode "$VFS_MODE" \
+  -vv \
+  > "$LOGFILE" 2>&1 &
+
+RCLONE_PID=$!
+sleep 1
+
+# Check if the process is still alive
+if ! kill -0 "$RCLONE_PID" 2>/dev/null; then
+  echo "ERROR: rclone mount process died immediately. Check log: $LOGFILE"
+  exit 1
+fi
+
+echo "uhpc-cloud-mount: rclone mount started (PID $RCLONE_PID)."
+echo "Log file: $LOGFILE"
+echo "Mounted $REMOTE_PATH at $MOUNTPOINT with cache in $CACHE_DIR."
