@@ -10,28 +10,27 @@
 # Where:
 #   LOCAL_FILE   = Path to the local file you want to copy, e.g. /dev/shm/data_local.dat
 #   REMOTE_FILE  = Desired path/name on the remote nodes, e.g. /dev/shm/data_remote.dat
+#                  or a directory ending with '/', e.g. /dev/shm/
 #   NODE_LIST    = Comma-separated node names, e.g. wn208,wn209
 #
-# This script will:
-#   1) Check if the user has a Slurm allocation on each requested node.
-#   2) If yes, it streams LOCAL_FILE over Slurm's I/O channel directly
-#      into REMOTE_FILE on that node.
-#   3) Avoids any shared filesystem usage, thus bypassing storage quota limits.
+# Example 1:
+#   # Full file path
+#   uhpc-multipush /dev/shm/mydata_local.dat /dev/shm/mydata_remote.dat wn208,wn209
+#
+# Example 2:
+#   # Directory path (ends with slash):
+#   uhpc-multipush /dev/shm/mydata_local.dat /dev/shm/ wn208,wn209
+#   # => it will store the file as /dev/shm/mydata_local.dat on each node
 #
 # Requirements:
 #   - Slurm commands: srun, squeue, scontrol
 #   - A valid Slurm allocation that includes each target node
 #
-# Example:
-#   salloc --nodes=2 --nodelist=wn208,wn209 --time=1:00:00
-#   uhpc-multipush /dev/shm/mydata_local.dat /dev/shm/mydata_remote.dat wn208,wn209
-#
-# The file /dev/shm/mydata_local.dat on your login node
-# will appear as /dev/shm/mydata_remote.dat on wn208 and wn209.
-#
+# By default, the script checks if you have an active Slurm allocation on each node
+# (via squeue). If not, it aborts.
 
-set -o errexit  # Exit immediately if a command exits with a non-zero status
-set -o nounset  # Treat unset variables as an error
+set -o errexit
+set -o nounset
 # set -o xtrace  # (Optional) Debug: echo all commands
 
 # ------------------------------------------------------------------------------
@@ -42,7 +41,8 @@ usage() {
   echo "Usage: $0 <LOCAL_FILE> <REMOTE_FILE> <NODE_LIST>"
   echo ""
   echo "  LOCAL_FILE   : Path to the file you want to copy (e.g. /dev/shm/data_local.dat)."
-  echo "  REMOTE_FILE  : Path/name on the remote nodes (e.g. /dev/shm/data_remote.dat)."
+  echo "  REMOTE_FILE  : Path/name on the remote nodes (e.g. /dev/shm/data_remote.dat),"
+  echo "                 or a directory path ending with '/', e.g. /dev/shm/."
   echo "  NODE_LIST    : Comma-separated node names (e.g. wn208,wn209)."
   echo ""
   echo "Example:"
@@ -52,27 +52,21 @@ usage() {
 }
 
 # Expand bracketed node ranges into one line per node
-# e.g., "wn[208-209]" => "wn208" and "wn209"
 expand_bracketed_nodes() {
   local bracket_expr="$1"
   scontrol show hostname "$bracket_expr" 2>/dev/null || true
 }
 
 # Check if the current user has an active Slurm allocation on the given node.
-# Return 0 if yes, 1 if not.
+# Return 0 if yes, 1 if no.
 user_has_allocation_on_node() {
   local node="$1"
-
-  # Gather all nodes allocated to the user.
-  # For each job, the node list might include bracket expressions: wn[208-209]
-  # We'll expand them into actual node names, then search for a match.
   local allocated_list
+
   allocated_list="$(squeue -u "$USER" --noheader -o '%N' 2>/dev/null || true)"
 
-  # If there's no output, user has no allocations
   [[ -z "$allocated_list" ]] && return 1
 
-  # Expand bracket expressions line by line
   local final_nodes=()
   while read -r node_expr; do
     while read -r expanded; do
@@ -80,7 +74,6 @@ user_has_allocation_on_node() {
     done < <(expand_bracketed_nodes "$node_expr")
   done <<< "$allocated_list"
 
-  # Check if $node is among final_nodes
   for n in "${final_nodes[@]}"; do
     if [[ "$n" == "$node" ]]; then
       return 0
@@ -94,7 +87,6 @@ user_has_allocation_on_node() {
 # MAIN
 # ------------------------------------------------------------------------------
 
-# Verify arguments
 if [[ $# -ne 3 ]]; then
   usage
 fi
@@ -103,20 +95,25 @@ LOCAL_FILE="$1"
 REMOTE_FILE="$2"
 NODE_LIST="$3"
 
-# Check that LOCAL_FILE actually exists
+# 1) Validate LOCAL_FILE
 if [[ ! -f "$LOCAL_FILE" ]]; then
   echo "ERROR: Local file '$LOCAL_FILE' does not exist or is not a regular file."
   exit 1
 fi
 
-# Split comma-separated NODE_LIST into array
+# 2) If REMOTE_FILE ends with '/', append basename of LOCAL_FILE
+#    So "uhpc-multipush local.dat /dev/shm/ wn219" becomes "/dev/shm/local.dat"
+if [[ "$REMOTE_FILE" =~ /$ ]]; then
+  REMOTE_FILE="${REMOTE_FILE}$(basename "$LOCAL_FILE")"
+fi
+
+# 3) Split comma-separated NODE_LIST
 IFS=',' read -ra NODES <<< "$NODE_LIST"
 
-# For each node, confirm user has an allocation and then push the file
+# 4) For each node, confirm user has an allocation and then push
 for node in "${NODES[@]}"; do
   if user_has_allocation_on_node "$node"; then
     echo "Copying '$LOCAL_FILE' to node '$node:$REMOTE_FILE' ..."
-    # Stream the file into the node’s REMOTE_FILE
     cat "$LOCAL_FILE" | srun --nodes=1 --ntasks=1 --nodelist="$node" \
         bash -c "cat > \"$REMOTE_FILE\""
   else
