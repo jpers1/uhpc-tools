@@ -129,98 +129,47 @@ uhpc-conda-stop <ENV_NAME>
 
 Note that if you were using `conda activate /dev/shm/...`, you’ll want to manually `conda deactivate` afterward, because `uhpc-conda-stop` no longer attempts to run `conda deactivate`.
 
----
-
-Below is a comprehensive **CLOUD_HOWTO.md** for mounting cloud storage on HPC (unprivileged) using rclone, followed by two new scripts:
-
-- **`uhpc-cloud-mount`**: A Bash script that encapsulates rclone mount, checks for running processes, sets up a RAM-based cache, and daemonizes itself (runs in the background).  
-- **`uhpc-cloud-umount`**: A companion script that unmounts a previously mounted folder.
-
-Finally, there is a **“Cloud Tools”** section that you can append to your existing `README.md` to document these new scripts under the UHPC-Tools collection.
-
----
-
-# CLOUD_HOWTO.md
-
-## Overview
-
-This guide explains how to mount a cloud storage folder (OneDrive, Dropbox, etc.) onto an HPC cluster using **rclone** without needing admin privileges. You can then access files as if they’re part of your local filesystem, all while respecting HPC policies and quotas.
-
-**Key Points**:
-
-- We rely on **user-space FUSE** (`rclone mount`) with no special privileges.  
-- HPC clusters often **limit** or discourage FUSE mounts, so ensure you **understand your site’s policies**.  
-- By default, rclone caches writes to your **home directory**, which can quickly exceed your quota. Hence, we show how to use a **RAM-based** cache (e.g., `/dev/shm`) to avoid filling up home directories.
-
-## 1. Requirements
-
-1. **rclone** installed in your PATH (can be a user installation).  
-2. **FUSE** support (e.g., `fusermount` is available).  
-3. **Cloud remote** configured with `rclone config`. For example, you might have a remote named `onedrive_remote:` or `dropbox_remote:`.
-
-## 2. HPC Caveats
-
-- **Login Node vs. Compute Node**: Some HPC systems only allow FUSE mounts on compute nodes (within an interactive or batch job).  
-- **Long-Running Processes**: HPC schedulers may kill user processes that remain after your job ends, or if you log out.  
-- **Performance**: Cloud-based I/O is relatively slow compared to HPC scratch/local storage. Copying/syncing data is often better for large or intensive jobs.
-
-## 3. Create and Configure Your Rclone Remote
-
-If you haven’t already, run:
-```bash
-rclone config
-```
-to set up a remote for your cloud provider (e.g., OneDrive, Dropbox, Google Drive). Ensure you can do a simple `rclone ls` to confirm it’s working:
-```bash
-rclone ls onedrive_remote:
-```
-
-## 4. Using `uhpc-cloud-mount` and `uhpc-cloud-umount`
 
 ### uhpc-cloud-mount
 
-- **Purpose**: Mount a cloud folder to a local path.  
-- **Features**:
-  1. Checks if `rclone` is already running for the current user.
-  2. Creates (or resets) a RAM-based cache directory in `/dev/shm`.
-  3. Spawns `rclone mount` in the background (daemonizes) so you keep your shell prompt free.
-  4. Uses `fusermount` to handle unprivileged FUSE.
+Mount a remote folder to a local path with optional memory-based cache. For example:
 
-**Example**:
 ```bash
-# Mount "onedrive_remote:MyData" to "/dev/shm/my_mount" using a RAM-based cache
+# Basic usage
 uhpc-cloud-mount onedrive_remote:MyData /dev/shm/my_mount
+
+# With custom cache directory and vfs mode
+uhpc-cloud-mount dropbox_remote:some_folder /mnt/cloud \
+    --cache-dir /dev/shm/$USER/cloud_cache \
+    --vfs-cache-mode writes
 ```
+
+This runs `rclone mount` in the background, logs to `--cache-dir/rclone_mount.log`, and frees your shell prompt. Check the log if something goes wrong.
 
 ### uhpc-cloud-umount
 
-- **Purpose**: Cleanly unmount a previously mounted folder.  
-- **Features**:
-  1. Checks if the specified path is actually mounted by rclone.
-  2. Calls `fusermount -u` (or similar) to unmount.
-  3. Optionally removes the associated cache directory if it was created by uhpc-cloud-mount.
+Unmount the folder:
 
-**Example**:
 ```bash
 uhpc-cloud-umount /dev/shm/my_mount
 ```
 
-## 5. Verify the Mount
+If you used a custom cache directory:
 
-After running `uhpc-cloud-mount`, you can open a **new terminal** (or the same one if you backgrounded the command) and do:
 ```bash
-ls /dev/shm/my_mount
+uhpc-cloud-umount /dev/shm/my_mount --cache-dir /dev/shm/$USER/cloud_cache
 ```
-If it lists your cloud files, you’ve successfully mounted the remote folder.
 
-## 6. Potential Issues & Troubleshooting
+It unmounts via `fusermount -u` and removes the cache directory if present.
 
-- **“fusermount3: not found”**: Some systems only have `fusermount`; see the HPC docs or create a symlink.  
-- **Cache Directory Fill-Up**: If the data you write is bigger than the available RAM (in `/dev/shm`), you’ll get “No space left on device” or “disk quota exceeded.”  
-- **Scheduler Kills**: If you run on a login node or your job ends, the HPC might kill your rclone process automatically. Consider using `tmux`/`screen` or do the mount inside a batch script.
+### Common Issues
 
+- **Quota Exceeded**: If you place the rclone cache in your home directory, large writes can exhaust quota. Use `/dev/shm` or HPC scratch.
+- **Policy Restrictions**: Some clusters don’t allow background FUSE mounts on login nodes or kill them upon session end. Work around by running in a batch job or `tmux/screen` session.
 
-## Example Workflow: Combining Cloud Tools and Conda Tools
+With these tools, you can quickly spin up a user-level cloud mount on HPC, manipulate files, and tear it down when done.
+
+### Example Workflow: Combining Cloud Tools and Conda Tools
 
 1. **Mount Your Cloud Folder on the Login Node**  
    - On the **login node**, use `uhpc-cloud-mount` to attach your remote folder. For example:
