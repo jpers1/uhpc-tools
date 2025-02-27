@@ -131,4 +131,8 @@ uhpc-conda-stop myenv
 ## License
 
 See the [LICENSE](LICENSE) file for details on usage terms. Contributions and issues are welcome!
-```
+---
+
+## Acknowledgments
+
+This project’s development was assisted by **ChatGPT o1-pro**, an AI-based language model. While we’ve done our best to validate the scripts and instructions, users should keep in mind that **there may be bugs or unforeseen issues**. Always review and test code in your own HPC environment before using it in production.
