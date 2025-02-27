@@ -1,6 +1,6 @@
 # UHPC-Tools
 
-UPPC-Tools ("musual HPC tools") is a lightweight collection of handy Bash scripts for Slurm clusters. Current scripts:
+UPPC-Tools ("Unusual HPC tools") is a lightweight collection of handy Bash scripts for Slurm clusters. Current scripts:
 
 - **ahpc-list**   
   Lists all cluster nodes with CPU, memory, and GPU usage.  
@@ -21,7 +21,7 @@ UPPC-Tools ("musual HPC tools") is a lightweight collection of handy Bash script
 2. Run the installation script (it will copy scripts to `~/.local/bin`):
     `./install.sh --user`
 
-3. Ensure `>~/.local/bin` is on your `PATH (usually it is, but if not, add something like:
+3. Ensure `>~/.local/bin` is on your `PATH`  (usually it is, but if not, add something like:
     `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`
 
 ***Option 2: System-Wide Installation**
