@@ -1,86 +1,104 @@
 #!/usr/bin/env bash
 #
-# uhpc-conda-start: Mount and activate a SquashFS-based conda environment in /dev/shm.
+# uhpc-conda-start: Mount a SquashFS-based conda environment in /dev/shm, without activation.
 #
 # Usage:
 #   uhpc-conda-start <SQUASHFS_FILE>
 #
 # Where:
-#   <SQUASHFS_FILE>  = Path to the .sqsh (or .squashfs) file containing a conda environment.
-#                      The environment name is derived from the file's basename minus '.sqsh'.
-#                      Example: "myenv.sqsh" => environment name "myenv".
+#   <SQUASHFS_FILE> = Path to the .sqsh (or .squashfs) file containing a conda environment.
+#                     The environment name is derived from the file's basename (minus '.sqsh').
 #
 # Behavior:
-#   1) Checks if <SQUASHFS_FILE> is already located in /dev/shm. If not, copies it to /dev/shm/$USER/.
-#   2) Mounts the file read-only at /dev/shm/$USER/conda/conda_envs/<ENV_NAME> using squashfuse.
-#   3) Runs: conda activate /dev/shm/$USER/conda/conda_envs/<ENV_NAME>.
+#   1) Resolve <SQUASHFS_FILE> to a full path.
+#   2) If a mount for that environment is already present, unmount it.
+#   3) Copy the .sqsh file into /dev/shm/$USER/ if it's not already under /dev/shm.
+#   4) Mount read-only at /dev/shm/$USER/conda/conda_envs/<ENV_NAME>.
+#   5) Print instructions for manual conda activation if desired.
 #
 # Requirements:
-#   - conda (and 'conda activate' available)
-#   - squashfuse installed (or a suitable fuse-based squashfs mount method)
+#   - 'squashfuse' installed
 #   - read/write access to /dev/shm
+#   - If you want to use "conda activate", do so manually by specifying the full path.
 #
 # Part of "uhpc-tools" (Unusual HPC Tools).
 
 set -o errexit
 set -o nounset
-# set -o xtrace  # (Optional) Debug mode
+# set -o xtrace  # Optional debugging
 
 usage() {
   echo "Usage: $0 <SQUASHFS_FILE>"
-  echo "Example:"
-  echo "  $0 /dev/shm/jpers/sd_gpu.sqsh"
+  echo ""
+  echo "  <SQUASHFS_FILE>  = Path to the .sqsh/.squashfs file containing a conda environment"
   exit 1
 }
 
+# 1) Parse arguments
 if [[ $# -ne 1 ]]; then
   usage
 fi
 
 SQUASH_FILE="$1"
 
-# 1) Check if the file actually exists
+# 2) Resolve to full path (so user can pass relative path)
+#    If readlink -f is not available on all HPCs, you could do a manual approach
+if command -v readlink >/dev/null 2>&1; then
+  SQUASH_FILE="$(readlink -f "$SQUASH_FILE" || echo "$SQUASH_FILE")"
+fi
+
+# Check that the file exists
 if [[ ! -f "$SQUASH_FILE" ]]; then
   echo "ERROR: File '$SQUASH_FILE' does not exist."
   exit 1
 fi
 
-# 2) Derive environment name from the basename (minus extension)
-BASE_NAME=$(basename "$SQUASH_FILE")
-ENV_NAME="${BASE_NAME%.sqsh}"      # strip trailing '.sqsh' if present
-ENV_NAME="${ENV_NAME%.squashfs}"   # or '.squashfs' if you prefer
+# 3) Derive environment name from the file's basename
+BASE_NAME="$(basename "$SQUASH_FILE")"
+ENV_NAME="${BASE_NAME%.sqsh}"
+ENV_NAME="${ENV_NAME%.squashfs}"
 
-# 3) Decide where to place or confirm the .sqsh file in /dev/shm
+# 4) Prepare paths
 SQSH_TARGET_DIR="/dev/shm/$USER"
 SQSH_TARGET_FILE="$SQSH_TARGET_DIR/$BASE_NAME"
+MOUNT_DIR="/dev/shm/$USER/conda/conda_envs/$ENV_NAME"
 
-if [[ "$SQUASH_FILE" == /dev/shm/* ]]; then
-  # It's already in /dev/shm
-  SQSH_TARGET_FILE="$SQUASH_FILE"
-else
-  # Not in /dev/shm - copy
-  mkdir -p "$SQSH_TARGET_DIR"
-  echo "Copying '$SQUASH_FILE' -> '$SQSH_TARGET_FILE' ..."
-  cp -v "$SQUASH_FILE" "$SQSH_TARGET_FILE"
+# 5) If there's already a mount at MOUNT_DIR, unmount it
+if mount | grep -q "$MOUNT_DIR"; then
+  echo "Unmounting existing mount at '$MOUNT_DIR' ..."
+  fusermount -u "$MOUNT_DIR" 2>/dev/null || umount -l "$MOUNT_DIR" 2>/dev/null || true
+  rm -rf "$MOUNT_DIR"
 fi
 
-# 4) Make sure squashfuse is available
+mkdir -p "$MOUNT_DIR"
+
+# 6) Make sure 'squashfuse' is available
 if ! command -v squashfuse &>/dev/null; then
-  echo "ERROR: 'squashfuse' not found. Load a module or install it."
+  echo "ERROR: 'squashfuse' not found. Please install it or load the HPC module."
   exit 1
 fi
 
-# 5) Create mount point for the environment
-MOUNT_DIR="/dev/shm/$USER/conda/conda_envs/$ENV_NAME"
-mkdir -p "$MOUNT_DIR"
+# 7) Copy to /dev/shm if needed
+if [[ "$SQUASH_FILE" == /dev/shm/* ]]; then
+  SQSH_TARGET_FILE="$SQUASH_FILE"
+else
+  mkdir -p "$SQSH_TARGET_DIR"
+  if [[ "$SQUASH_FILE" != "$SQSH_TARGET_FILE" ]]; then
+    echo "Copying '$SQUASH_FILE' -> '$SQSH_TARGET_FILE' ..."
+    cp -v "$SQUASH_FILE" "$SQSH_TARGET_FILE"
+  fi
+fi
 
-# 6) Mount read-only
+# 8) Mount it read-only
 echo "Mounting '$SQSH_TARGET_FILE' at '$MOUNT_DIR' ..."
 squashfuse "$SQSH_TARGET_FILE" "$MOUNT_DIR" -o ro
 
-# 7) Activate environment
-echo "Activating conda environment at '$MOUNT_DIR' ..."
-conda activate "$MOUNT_DIR"
-
-echo "Done. Environment '$ENV_NAME' is mounted and activated."
-echo "Use 'uhpc-conda-stop $ENV_NAME' to deactivate and unmount."
+echo "Done. Environment '$ENV_NAME' is mounted at '$MOUNT_DIR'."
+echo ""
+echo "To activate manually, run:"
+echo "  conda activate \"$MOUNT_DIR\""
+echo ""
+echo "Or simply add '$MOUNT_DIR/bin' to your PATH:"
+echo "  export PATH=\"$MOUNT_DIR/bin:\$PATH\""
+echo ""
+echo "When finished, run:  uhpc-conda-stop $ENV_NAME"

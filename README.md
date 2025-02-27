@@ -86,47 +86,74 @@
 
 ---
 
-### uhpc-conda-start
+### `uhpc-conda-start`
 
-Given a SquashFS file (e.g., `myenv.sqsh`) containing a conda environment:
-
+This script mounts a **SquashFS**-compressed Conda environment in `/dev/shm` (RAM disk), without automatically activating it.
+**Usage**:
 ```bash
 uhpc-conda-start <SQUASHFS_FILE>
 ```
+**What It Does**:
 
-- The script infers the environment name from the file’s basename (e.g., `myenv.sqsh` => `myenv`).
-- If `<SQUASHFS_FILE>` is not in `/dev/shm`, it’s copied to `/dev/shm/$USER/`.
-- Then it’s mounted at `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>` (read-only).
-- Finally, the environment is activated via `conda activate /dev/shm/$USER/conda/conda_envs/<ENV_NAME>`.
+1. **Resolves** `<SQUASHFS_FILE>` to a full path (if possible).
+2. **Unmounts** any stale mount for the same environment name (if it exists).
+3. **Copies** the file into `/dev/shm/$USER/` if needed.
+4. **Mounts** the file read-only at `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>` (derived from the file’s basename minus `.sqsh` or `.squashfs`).
+5. Prints instructions on how to **manually** activate the environment.
 
-For example:
+**Manual Activation**
+After mounting completes, you have two main options:
 
-```bash
-uhpc-conda-start /path/to/myenv.sqsh
-# => environment "myenv" is mounted and activated
-```
+- **Conda**:
+  ```bash
+  conda activate /dev/shm/$USER/conda/conda_envs/<ENV_NAME>
+  ```
+- **PATH**:
+  ```bash
+  export PATH="/dev/shm/$USER/conda/conda_envs/<ENV_NAME>/bin:$PATH"
+  ```
 
----
+This approach avoids any issues with sub-shells or HPC environment conflicts. **If** you want to “deactivate,” just run `conda deactivate` or open a new shell.
 
-### uhpc-conda-stop
+### `uhpc-conda-stop`
 
-Once you’ve finished using an environment started by `uhpc-conda-start`, you can deactivate and unmount it:
+Once you’re finished with the environment:
 
 ```bash
 uhpc-conda-stop <ENV_NAME>
 ```
+**What It Does**:
 
-- Runs `conda deactivate`.
-- Unmounts the environment from `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>`.
-- Removes the mount point directory.
+1. **Unmounts** `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>` if it’s mounted.
+2. **Removes** the mount directory.
 
-For example:
-
-```bash
-uhpc-conda-stop myenv
-```
+Note that if you were using `conda activate /dev/shm/...`, you’ll want to manually `conda deactivate` afterward, because `uhpc-conda-stop` no longer attempts to run `conda deactivate`.
 
 ---
+
+### Example Workflow
+
+1. **Allocate** a node:
+   ```bash
+   salloc --nodes=1 --partition=gpu --time=1:00:00
+   ```
+2. **Mount** the environment:
+   ```bash
+   uhpc-conda-start /path/to/myenv.sqsh
+   ```
+   (It shows you it’s now at `/dev/shm/$USER/conda/conda_envs/myenv`.)
+
+3. **Activate** if desired:
+   ```bash
+   conda activate /dev/shm/$USER/conda/conda_envs/myenv
+   ```
+4. **Use** your environment.
+5. **Stop** when done:
+   ```bash
+   conda deactivate   # if used
+   uhpc-conda-stop myenv
+   ```
+
 
 ## License
 
