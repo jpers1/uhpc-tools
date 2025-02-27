@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+# uhpc-list: Show node resource usage. 
+#            By default, prints all nodes. 
+#            If --free is given, only prints MIX, IDLE, or free-CPU nodes.
+#
+# Usage:
+#   uhpc-list
+#   uhpc-list --free
+#
+
+# Check if user specified --free
+FREE_MODE=false
+if [[ $# -eq 1 && "$1" == "--free" ]]; then
+  FREE_MODE=true
+fi
+
+# We'll build our output in one block, then pipe the entire block to 'column -t'.
+{
+  # Print the header first (using spaces between columns)
+  echo "NODE STATE ALLOC_CPUS TOTAL_CPUS FREE_CPUS LOAD_PCT TOTAL_MEM_GB ALLOC_MEM_GB FREE_MEM_GB TOTAL_GPUS ALLOC_GPUS"
+
+  # Get node list and expand ranges
+  nodes=$(scontrol show hostname "$(sinfo -h -o "%N")")
+
+  for node in $nodes; do
+      # Get node info
+      node_info=$(scontrol show node "$node")
+
+      # Extract CPU-related values
+      state=$(echo "$node_info" | grep -oP "State=\K\S+")
+      allocated_cpus=$(echo "$node_info" | grep -oP "CPUAlloc=\K\d+")
+      total_cpus=$(echo "$node_info" | grep -oP "CPUTot=\K\d+")
+      load=$(echo "$node_info" | grep -oP "CPULoad=\K[\d\.]+")
+
+      # Extract memory (in MB)
+      total_mem=$(echo "$node_info" | grep -oP "RealMemory=\K\d+")
+      alloc_mem=$(echo "$node_info" | grep -oP "AllocMem=\K\d+")
+      free_mem=$(echo "$node_info" | grep -oP "FreeMem=\K\d+")
+
+      # Extract GPU info
+      total_gpus=$(echo "$node_info" | grep -oP "Gres=gpu:\K\d+")
+      allocated_gpus=$(echo "$node_info" | grep -oP "AllocTRES=[^ ]*" | grep -oP "gres/gpu=\K\d+")
+
+      # Fallback defaults if missing
+      allocated_cpus=${allocated_cpus:-0}
+      total_cpus=${total_cpus:-0}
+      load=${load:-0}
+      total_mem=${total_mem:-0}
+      alloc_mem=${alloc_mem:-0}
+      free_mem=${free_mem:-0}
+      total_gpus=${total_gpus:-0}
+      allocated_gpus=${allocated_gpus:-0}
+
+      # Calculate free CPUs
+      free_cpus=$(( total_cpus - allocated_cpus ))
+
+      # Convert memory to GB (two decimals)
+      total_mem_gb=$(awk -v mem="$total_mem" 'BEGIN {printf "%.2f", mem / 1024}')
+      alloc_mem_gb=$(awk -v mem="$alloc_mem" 'BEGIN {printf "%.2f", mem / 1024}')
+      free_mem_gb=$(awk -v mem="$free_mem"   'BEGIN {printf "%.2f", mem / 1024}')
+
+      # Convert CPU load to percentage (one decimal)
+      load_pct=$(awk -v l="$load" -v t="$total_cpus" 'BEGIN {
+          if (t > 0) printf "%.1f", (100.0 * l / t);
+          else printf "0.0";
+      }')
+
+      # Decide whether to print this node's data, based on --free
+      if "$FREE_MODE"; then
+          # Original "getfree" filter: only print if MIX, IDLE, or free CPUs
+          if [[ "$state" == "MIX" || "$state" == "IDLE" || "$free_cpus" -gt 0 ]]; then
+              echo "$node $state $allocated_cpus $total_cpus $free_cpus $load_pct $total_mem_gb $alloc_mem_gb $free_mem_gb $total_gpus $allocated_gpus"
+          fi
+      else
+          # No filter -> print all nodes
+          echo "$node $state $allocated_cpus $total_cpus $free_cpus $load_pct $total_mem_gb $alloc_mem_gb $free_mem_gb $total_gpus $allocated_gpus"
+      fi
+  done
+} | column -t
