@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# uhpc-salloc: Allocate a node, spawn multiple shells, detach in background.
+#
+# Usage: uhpc-salloc [NUM_SHELLS] [--partition=<part>] [--time=<HH:MM:SS>]
+# Defaults: NUM_SHELLS=2, partition=compute, time=1:00:00
+#
+# Example:
+#   uhpc-salloc 3 --partition=gpu --time=2:00:00
+#
+# After it spawns shells, it goes into the background so your terminal is freed.
+# It will print the jobID and instructions for how to attach with uhpc-login.
+
+set -e
+
+# Defaults
+NUM_SHELLS=2
+PARTITION="compute"
+TIME="1:00:00"
+
+# Parse arguments naively
+for arg in "$@"; do
+  case $arg in
+    --partition=*) PARTITION="${arg#*=}"; shift ;;
+    --time=*) TIME="${arg#*=}"; shift ;;
+    *)
+      # If it's purely numeric and not an option
+      if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        NUM_SHELLS="$arg"
+      else
+        echo "Unrecognized argument: $arg"
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
+
+echo "[uhpc-salloc] Requesting a Slurm allocation for 1 node, partition=$PARTITION, time=$TIME ..."
+ALLOCATION_OUTPUT=$(salloc -N1 -p "$PARTITION" -t "$TIME" --no-shell 2>&1)
+
+JOBID=$(echo "$ALLOCATION_OUTPUT" | grep "Granted job allocation" | awk '{print $4}')
+if [ -z "$JOBID" ]; then
+  echo "[uhpc-salloc] ERROR: Failed to parse job ID from salloc output."
+  echo "$ALLOCATION_OUTPUT"
+  exit 1
+fi
+
+echo "[uhpc-salloc] Successfully allocated job=$JOBID"
+echo "[uhpc-salloc] Spawning $NUM_SHELLS shells..."
+
+# We spawn multiple "interactive" steps. Each is a bash that just sits.
+# We run them in the background, ignoring standard I/O for now.
+# The job stays alive as long as these steps are running.
+for i in $(seq 1 "$NUM_SHELLS"); do
+  STEP_NAME="shell$i"
+  srun --jobid="$JOBID" --ntasks=1 -d singleton \
+       --pty -J "$STEP_NAME" bash < /dev/null > /dev/null 2>&1 &
+  echo "  [uhpc-salloc] Started step '$STEP_NAME' in background."
+done
+
+cat <<EOF
+
+[uhpc-salloc] All shells are running under JobID $JOBID.
+
+To attach to one of them, run e.g.:
+  uhpc-login $JOBID 1   # attach to "shell1"
+  uhpc-login $JOBID 2   # attach to "shell2"
+... etc.
+
+Once attached, you can run commands in that shell. 
+To "log off" but keep the shell alive, run 'uhpc-logoff' inside the attached shell. 
+Finally, when you are done with *all* shells, run:
+  uhpc-unalloc $JOBID
+
+This script will now background itself so you can close this terminal or log out,
+and the allocation remains active.
+EOF
+
+# Instead of sleeping in foreground, we do a "self-background" trick:
+(
+  # We'll just sleep forever so that salloc doesn't terminate,
+  # but we do it in a subshell, in the background, with no output.
+  nohup bash -c "while true; do sleep 3600; done" >/dev/null 2>&1 &
+) &
+
+disown -a  # Detach from all jobs
+exit 0

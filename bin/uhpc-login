@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# uhpc-login: Attach to one of the shells created by uhpc-salloc
+#
+# Usage: uhpc-login <JOBID> <SHELL_INDEX>
+#
+# Example:
+#   uhpc-login 123456 1
+#   (Attaches to step named "shell1" in job 123456)
+
+JOBID="$1"
+SHELL_INDEX="$2"
+
+if [ -z "$JOBID" ] || [ -z "$SHELL_INDEX" ]; then
+  echo "Usage: $0 <JOBID> <SHELL_INDEX>"
+  exit 1
+fi
+
+STEP_NAME="shell${SHELL_INDEX}"
+
+echo "[uhpc-login] Attaching to job=$JOBID step=$STEP_NAME ..."
+echo "----------------------------------------------------------"
+echo "Press Ctrl+D or type 'exit' to end the shell (terminates it)."
+echo "Or run 'uhpc-logoff' to detach but keep the shell alive."
+echo "----------------------------------------------------------"
+
+# Use Slurm's sattach to hook onto that step's TTY/IO
+sattach --job-name="$STEP_NAME" "$JOBID"

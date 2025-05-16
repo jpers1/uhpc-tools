@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# uhpc-list: Show node resource usage. 
-#            By default, prints all nodes. 
+# uhpc-list: Show node resource usage.
+#            By default, prints all nodes.
 #            If --free is given, only prints MIX, IDLE, or free-CPU nodes.
 #
 # Usage:
@@ -18,10 +18,11 @@ fi
 # We'll build our output in one block, then pipe the entire block to 'column -t'.
 {
   # Print the header first (using spaces between columns)
-  echo "NODE STATE ALLOC_CPUS TOTAL_CPUS FREE_CPUS LOAD_PCT TOTAL_MEM_GB ALLOC_MEM_GB FREE_MEM_GB TOTAL_GPUS ALLOC_GPUS"
+  # Added "SSD" to the header
+  echo "NODE STATE ALLOC_CPUS TOTAL_CPUS FREE_CPUS LOAD_PCT TOTAL_MEM_GB ALLOC_MEM_GB FREE_MEM_GB TOTAL_GPUS ALLOC_GPUS SSD"
 
   # Get node list and expand ranges
-  nodes=$(scontrol show hostname "$(sinfo -h -o "%N")")
+  nodes=$(sinfo -h -o "%N" | xargs scontrol show hostname)
 
   for node in $nodes; do
       # Get node info
@@ -41,6 +42,13 @@ fi
       # Extract GPU info
       total_gpus=$(echo "$node_info" | grep -oP "Gres=gpu:\K\d+")
       allocated_gpus=$(echo "$node_info" | grep -oP "AllocTRES=[^ ]*" | grep -oP "gres/gpu=\K\d+")
+
+      # Extract ephemeral SSD from TmpDisk (in MB)
+      ephemeral_tmpdisk=$(echo "$node_info" | grep -oP "TmpDisk=\K\d+")
+      ephemeral_tmpdisk=${ephemeral_tmpdisk:-0}  # fallback if not found
+
+      # Convert ephemeral SSD to GB (two decimals)
+      ephemeral_gb=$(awk -v ssd="$ephemeral_tmpdisk" 'BEGIN { printf "%.2f", ssd / 1024 }')
 
       # Fallback defaults if missing
       allocated_cpus=${allocated_cpus:-0}
@@ -70,11 +78,11 @@ fi
       if "$FREE_MODE"; then
           # Original "getfree" filter: only print if MIX, IDLE, or free CPUs
           if [[ "$state" == "MIX" || "$state" == "IDLE" || "$free_cpus" -gt 0 ]]; then
-              echo "$node $state $allocated_cpus $total_cpus $free_cpus $load_pct $total_mem_gb $alloc_mem_gb $free_mem_gb $total_gpus $allocated_gpus"
+              echo "$node $state $allocated_cpus $total_cpus $free_cpus $load_pct $total_mem_gb $alloc_mem_gb $free_mem_gb $total_gpus $allocated_gpus $ephemeral_gb"
           fi
       else
           # No filter -> print all nodes
-          echo "$node $state $allocated_cpus $total_cpus $free_cpus $load_pct $total_mem_gb $alloc_mem_gb $free_mem_gb $total_gpus $allocated_gpus"
+          echo "$node $state $allocated_cpus $total_cpus $free_cpus $load_pct $total_mem_gb $alloc_mem_gb $free_mem_gb $total_gpus $allocated_gpus $ephemeral_gb"
       fi
   done
 } | column -t
