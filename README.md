@@ -25,7 +25,7 @@
   ```bash
   uhpc-list
   uhpc-list --free
-```
+  ```
 
 **Examples**:
 
