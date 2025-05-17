@@ -2,61 +2,260 @@
 
 **UHPC-Tools** ("Unusual HPC Tools") is a lightweight collection of handy Bash scripts for Slurm clusters. Current scripts:
 
+## Table of Contents
+1. [Helper Scripts for New HPC Users (Minimal Disk Quota)](#helper-scripts-for-new-hpc-users-often-with-minimal-disk-quota)
+2. [Helper Scripts for Multiple Interactive Shells](#helper-scripts-for-multiple-interactive-shells)
+3. [Helper Scripts for Working with Cloud Storage](#helper-scripts-for-working-with-cloud-storage-eg-onedrive)
+4. [Detailed Cloud How-To](CLOUD_HOWTO.md)
+5. [Detailed Conda How-To](CONDA_HOWTO.md)
+
+---
+
+
+### Helper scripts for new HPC users, often with minimal disk quota
+
+
 - **uhpc-list**  
-  Lists all cluster nodes with CPU, memory, and GPU usage.  
+  **What it does**:  
+  Lists all cluster nodes with CPU, memory, GPU usage, and ephemeral SSD capacity.  
   - By default, prints every node.  
-  - `--free` shows only MIX or IDLE nodes or those with free CPUs.
+  - `--free` shows only MIX or IDLE nodes or those with free CPUs.  
 
-- **uhpc-multipush**  
-  Streams a local file (for example, from `/dev/shm`) to `/dev/shm` on one or more allocated Slurm nodes, bypassing shared filesystem quotas.
+  **Usage**:  
+  ```bash
+  uhpc-list
+  uhpc-list --free
+```
 
-- **uhpc-conda-start**  
-  Given a SquashFS file (e.g., `myenv.sqsh`) containing a conda environment, this script:
-  1. Copies it to `/dev/shm/$USER/` if it’s not already on `/dev/shm`.
-  2. Mounts it read-only at `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>`.
-  3. Activates the environment via `conda activate /dev/shm/$USER/conda/conda_envs/<ENV_NAME>`.
+**Examples**:
 
-- **uhpc-conda-stop**  
-  Deactivates and unmounts an environment that was started with **uhpc-conda-start**:
-  1. `conda deactivate`
-  2. Unmounts the environment folder (`fusermount -u`)
-  3. Removes the mount directory in `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>`
+*   `uhpc-list`  
+    Lists all nodes in a column-aligned table.
+    
+*   `uhpc-list --free`  
+    Shows only nodes that are MIX, IDLE, or have free CPUs.
+    
 
-**four** new scripts that let you spawn multiple interactive Bash shells in a single Slurm allocation, attach/detach them, and release resources:
+* * *
 
-1. **uhpc-salloc**  
-   - **What it does**: Allocates a node (or nodes) without giving you a shell immediately. Instead, it spawns a configurable number of Bash “shell steps” in the background.  
-   - **Usage**:  
-     ```bash
-     uhpc-salloc [NUM_SHELLS] [--partition=<part>] [--time=<HH:MM:SS>]
-     ```
-     - Defaults: `NUM_SHELLS=2`, `partition=compute`, `time=1:00:00`.  
-   - **Example**:  
-     ```bash
-     uhpc-salloc 3 --partition=gpu --time=2:00:00
-     ```
-     This starts a job with ID (e.g. `123456`) and spawns `shell1`, `shell2`, `shell3`. The script detaches in the background so you can keep using your terminal.
+*   **uhpc-multipush**  
+    **What it does**:  
+    Streams a local file (for example, from `/dev/shm`) to `/dev/shm` on one or more allocated Slurm nodes, bypassing shared filesystem quotas.
+    
+    *   Requires that you already have a Slurm allocation on the target nodes.
+        
+    
+    **Usage**:
+    
+    ```bash
+    uhpc-multipush <LOCAL_FILE> <REMOTE_FILE> <NODE_LIST>
+    ```
+    
+    Where:
+    
+    *   `LOCAL_FILE` = Path to the local file (e.g., `/dev/shm/data_local.dat`).
+        
+    *   `REMOTE_FILE` = Desired path on the remote nodes (e.g., `/dev/shm/data_remote.dat`), or a directory ending with `/`.
+        
+    *   `NODE_LIST` = Comma-separated node names (e.g., `wn208,wn209`).
+        
+    
+    **Example**:
+    
+    ```bash
+    salloc --nodes=2 --nodelist=wn208,wn209 --time=1:00:00
+    uhpc-multipush /dev/shm/mydata_local.dat /dev/shm/mydata_remote.dat wn208,wn209
+    ```
+    
+    Copies `mydata_local.dat` from the local machine into `/dev/shm/mydata_remote.dat` on each of `wn208` and `wn209`.
+    
 
-2. **uhpc-login**  
-   - **What it does**: Attaches you to one of the spawned shells in the running job.  
-   - **Usage**:  
-     ```bash
-     uhpc-login <JOBID> <SHELL_INDEX>
-     ```
-     - `<SHELL_INDEX>` corresponds to `shell1`, `shell2`, etc.  
-   - **Under the hood**: Uses `sattach --job-name=shellX <JOBID>`.
+* * *
 
-3. **uhpc-logoff**  
-   - **What it does**: Run it *inside* the attached shell to “detach” but keep the shell itself running in the background.  
-   - **Note**: Slurm doesn’t always allow a perfect “detach.” If successful, you can reattach later with `uhpc-login`. If it fails, your shell might exit. For a more robust approach, consider tmux or screen.
+*   **uhpc-conda-start**  
+    **What it does**:  
+    Given a SquashFS file (e.g., `myenv.sqsh`) containing a Conda environment, this script mounts it read-only in `/dev/shm` (RAM disk).
+    
+    *   Does **not** automatically activate the environment—users can do so manually.
+        
+    
+    **Usage**:
+    
+    ```bash
+    uhpc-conda-start <SQUASHFS_FILE>
+    ```
+    
+    **Steps**:
+    
+    1.  Copies `<SQUASHFS_FILE>` to `/dev/shm/$USER/` if it’s not already in `/dev/shm`.
+        
+    2.  Mounts it read-only at `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>` (derived from the file name minus `.sqsh`/`.squashfs`).
+        
+    3.  Prints instructions on how to manually activate the environment via Conda or by modifying `PATH`.
+        
+    
+    **Example**:
+    
+    ```bash
+    uhpc-conda-start /home/user/myenv.sqsh
+    ```
+    
+    This mounts the environment in `/dev/shm/$USER/conda/conda_envs/myenv`. You can then do:
+    
+    ```bash
+    conda activate /dev/shm/$USER/conda/conda_envs/myenv
+    ```
+    
 
-4. **uhpc-unalloc**  
-   - **What it does**: Cancels (`scancel`) the entire job by ID, killing all shells and releasing resources.  
-   - **Usage**:  
-     ```bash
-     uhpc-unalloc <JOBID>
-     ```
+* * *
 
+*   **uhpc-conda-stop**  
+    **What it does**:  
+    Deactivates (manually, if desired) and **unmounts** a Conda environment that was started with `uhpc-conda-start`.
+    
+    **Usage**:
+    
+    ```bash
+    uhpc-conda-stop <ENV_NAME>
+    ```
+    
+    **Steps**:
+    
+    1.  (Optional) `conda deactivate` (if you had activated it).
+        
+    2.  Unmounts the environment folder (`fusermount -u` or `umount`).
+        
+    3.  Removes the mount directory in `/dev/shm/$USER/conda/conda_envs/<ENV_NAME>`.
+        
+    
+    **Example**:
+    
+    ```bash
+    uhpc-conda-stop myenv
+    ```
+    
+    Unmounts `/dev/shm/$USER/conda/conda_envs/myenv` and cleans up.
+    
+### Helper Scripts for Multiple Interactive Shells
+
+These scripts let you allocate HPC resources (once) and open **any number** of interactive Bash shells within the same Slurm job—each in its own terminal window.
+
+1.  **uhpc-salloc**
+    
+    *   **What it does**:
+        
+        *   Allocates a node (or nodes) with `salloc --no-shell`, parsing out the **job ID**.
+            
+        *   Frees your terminal so you can **open multiple interactive shells** in separate windows (each attached to that same job).
+            
+    *   **Usage**:
+        
+        ```bash
+        uhpc-salloc [--partition=<part>] [--time=<HH:MM:SS>] [other Slurm options...]
+        ```
+        
+        *   Defaults: `partition=compute`, `time=1:00:00`.
+            
+    *   **Example**:
+        
+        ```bash
+        uhpc-salloc --partition=gpu --time=2:00:00 --gres=gpu:1
+        ```
+        
+        Suppose it prints “Allocated JobID=123456”; you can then open as many terminals as you like, each running `uhpc-login 123456`.
+        
+2.  **uhpc-login**
+    
+    *   **What it does**:
+        
+        *   From another terminal window (or the same one), opens a **new** fully interactive Bash shell inside the already-allocated job.
+            
+    *   **Usage**:
+        
+        ```bash
+        uhpc-login <JOBID> [<SHELL_INDEX>]
+        ```
+        
+        *   `SHELL_INDEX` is optional; it just helps label each shell step (like `shell1`, `shell2`). If omitted, a random label is used.
+            
+    *   **Under the Hood**:
+        
+        *   Uses `srun --jobid=<JOBID> --pty bash` so Slurm grants a real interactive shell, each with its own TTY.
+            
+3.  **uhpc-unalloc**
+    
+    *   **What it does**:
+        
+        *   Cancels (`scancel`) the entire job by ID, killing all open shells and releasing resources.
+            
+    *   **Usage**:
+        
+        ```bash
+        uhpc-unalloc <JOBID>
+        ```
+
+### Helper Scripts for working with cloud storage (e.g. OneDrive)
+
+
+- **uhpc-cloud-mount**  
+  **What it does**:  
+  Mounts a remote cloud folder (via rclone) on a local path (FUSE mount), commonly with a RAM-based cache in `/dev/shm`.  
+  - Automatically backgrounds the `rclone mount` process and logs to a file in the cache directory.
+
+  **Usage**:  
+  ```bash
+  uhpc-cloud-mount <REMOTE:PATH> <MOUNTPOINT> [--cache-dir /some/dir] [--vfs-cache-mode mode]
+```
+
+Where:
+
+*   `<REMOTE:PATH>` is the rclone remote and path (e.g. `onedrive_remote:MyData`).
+    
+*   `<MOUNTPOINT>` is where the folder will be mounted locally (must exist or be creatable).
+    
+*   `--cache-dir` (optional) overrides the default `/dev/shm/rclone_cache_$USER`.
+    
+*   `--vfs-cache-mode` (optional) defaults to `writes`.
+    
+
+**Example**:
+
+```bash
+uhpc-cloud-mount onedrive_remote:MyData /dev/shm/my_mount \
+    --cache-dir /dev/shm/$USER/cloud_cache \
+    --vfs-cache-mode writes
+```
+
+This sets up a background `rclone mount` process that logs to `/dev/shm/$USER/cloud_cache/rclone_mount.log`, mounting `MyData` to `/dev/shm/my_mount`.
+
+* * *
+
+*   **uhpc-cloud-umount**  
+    **What it does**:  
+    Unmounts an existing rclone FUSE mount and optionally removes the cache directory.
+    
+    **Usage**:
+    
+    ```bash
+    uhpc-cloud-umount <MOUNTPOINT> [--cache-dir /some/dir]
+    ```
+    
+    Where:
+    
+    *   `<MOUNTPOINT>` is the path used by `uhpc-cloud-mount` (e.g. `/dev/shm/my_mount`).
+        
+    *   `--cache-dir` overrides the default `/dev/shm/rclone_cache_$USER` for cleaning up logs/files.
+        
+    
+    **Example**:
+    
+    ```bash
+    uhpc-cloud-umount /dev/shm/my_mount --cache-dir /dev/shm/$USER/cloud_cache
+    ```
+    
+    This unmounts the FUSE mount at `/dev/shm/my_mount` and removes the cache directory if specified.
+    
+       
 ---
 
 ## Installation
@@ -295,24 +494,30 @@ Following these steps ensures minimal HPC quota usage, respects HPC and cloud pr
 ### Example Multi-Shell Workflow
 
 ```bash
-# 1) Start a job with 3 shells on GPU partition for 2 hours
-uhpc-salloc 3 --partition=gpu --time=2:00:00
-# -> prints a Job ID, e.g., "123456"
+# 1) Allocate resources (no immediate shell) on a GPU node for 2 hours:
+uhpc-salloc --partition=gpu --time=2:00:00
+# -> prints something like "Allocated JobID=123456"
 
-# 2) Attach to shell1
-uhpc-login 123456 1
-# -> you are now in a Bash prompt on the compute node.
+# 2) In a NEW terminal, open your first shell:
+uhpc-login 123456
+# -> Now you have a fully interactive Bash prompt on the compute node.
 
-# 3) If you want to detach (leave the shell running):
-uhpc-logoff
-# -> tries to keep that Bash alive in the background.
+# 3) Open more shells (each in a new terminal) if you wish:
+uhpc-login 123456 2
+uhpc-login 123456 3
+# -> You can watch GPU usage in one shell, run training in another, etc.
 
-# 4) Reattach later:
-uhpc-login 123456 1
+# 4) End an individual shell:
+exit
+# or Ctrl+D in that shell
 
-# 5) Finally, when done with all shells:
+# 5) When you're finished with all shells, free the resources:
 uhpc-unalloc 123456
-# -> frees the entire allocation.
+# -> Cancels the entire job, ending any remaining shells.
+```
+
+In this approach, you get multiple independent Bash sessions on the same node. Each is a real interactive step with a TTY from the start, **avoiding** the orphaned background shell issues. If you need to log out or close one shell, the others keep running until you `uhpc-unalloc` or time runs out.
+
 
 
 ## License
