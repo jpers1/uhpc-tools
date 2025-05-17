@@ -205,7 +205,7 @@ These scripts let you allocate HPC resources (once) and open **any number** of i
   **Usage**:  
   ```bash
   uhpc-cloud-mount <REMOTE:PATH> <MOUNTPOINT> [--cache-dir /some/dir] [--vfs-cache-mode mode]
-```
+  ```
 
 Where:
 
