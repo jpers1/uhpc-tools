@@ -27,13 +27,6 @@ Cancel the job and free all allocated resources.
 uhpc-unalloc <JOBID>
 ```
 
-## `uhpc-logoff`
-Attempt to detach from an attached shell while keeping it running in the background. This relies on `sattach` and may not work in all environments.
-
-**Usage**
-```bash
-uhpc-logoff
-```
 
 ### Example workflow
 ```bash
