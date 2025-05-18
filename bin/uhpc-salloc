@@ -68,9 +68,7 @@ To attach to one of them, run e.g.:
   uhpc-login $JOBID 2   # attach to "shell2"
 ... etc.
 
-Once attached, you can run commands in that shell. 
-To "log off" but keep the shell alive, run 'uhpc-logoff' inside the attached shell. 
-Finally, when you are done with *all* shells, run:
+Once attached, you can run commands in that shell. When you are done with *all* shells, run:
   uhpc-unalloc $JOBID
 
 This script will now background itself so you can close this terminal or log out,
