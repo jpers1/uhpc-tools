@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 #
-# uhpc-unalloc: Terminate/cancel a job (and all shells).
+# uhpc-unalloc: Cancel a Slurm job (and all running shells).
 #
-# Usage: uhpc-unalloc <JOBID>
-#
-# Example:
-#   uhpc-unalloc 123456
+# Usage:
+#   uhpc-unalloc <JOBID>
 
 JOBID="$1"
-
-if [ -z "$JOBID" ]; then
+if [[ -z "$JOBID" ]]; then
   echo "Usage: $0 <JOBID>"
   exit 1
 fi
 
-echo "[uhpc-unalloc] Canceling job $JOBID ..."
+echo "[uhpc-unalloc] Canceling job $JOBID..."
 scancel "$JOBID"
