@@ -2,11 +2,15 @@
 #
 # uhpc-salloc: Allocate a node, spawn multiple shells, detach in background.
 #
-# Usage: uhpc-salloc [NUM_SHELLS] [--partition=<part>] [--time=<HH:MM:SS>]
-# Defaults: NUM_SHELLS=2, partition=compute, time=1:00:00
+# Usage: uhpc-salloc [NUM_SHELLS] [<any Slurm options>]
+# Defaults:
+#   NUM_SHELLS=2
+#   --partition=compute (unless user provides --partition=xxx)
+#   --time=1:00:00 (unless user provides --time=xxx)
+#   -N1 (one node)
 #
 # Example:
-#   uhpc-salloc 3 --partition=gpu --time=2:00:00
+#   uhpc-salloc 3 --partition=gpu --time=2:00:00 --gres=gpu:2 --mem=120G ...
 #
 # After it spawns shells, it goes into the background so your terminal is freed.
 # It will print the jobID and instructions for how to attach with uhpc-login.
@@ -14,30 +18,51 @@
 set -e
 
 # Defaults
-NUM_SHELLS=2
-PARTITION="compute"
-TIME="1:00:00"
+DEFAULT_NUM_SHELLS=2
+DEFAULT_PARTITION="compute"
+DEFAULT_TIME="1:00:00"
 
-# Parse arguments naively
+# Parse arguments
+NUM_SHELLS="$DEFAULT_NUM_SHELLS"
+EXTRA_ARGS=()
+
+PARTITION_SPECIFIED=false
+TIME_SPECIFIED=false
+
 for arg in "$@"; do
-  case $arg in
-    --partition=*) PARTITION="${arg#*=}"; shift ;;
-    --time=*) TIME="${arg#*=}"; shift ;;
-    *)
-      # If it's purely numeric and not an option
-      if [[ "$arg" =~ ^[0-9]+$ ]]; then
-        NUM_SHELLS="$arg"
-      else
-        echo "Unrecognized argument: $arg"
-        exit 1
-      fi
-      shift
-      ;;
-  esac
+  # If it's purely numeric, treat as NUM_SHELLS:
+  if [[ "$arg" =~ ^[0-9]+$ ]]; then
+    NUM_SHELLS="$arg"
+    continue
+  fi
+
+  # Detect if user explicitly set partition or time
+  if [[ "$arg" == --partition=* ]]; then
+    PARTITION_SPECIFIED=true
+  elif [[ "$arg" == --time=* ]]; then
+    TIME_SPECIFIED=true
+  fi
+
+  # Pass all non-numeric args to salloc
+  EXTRA_ARGS+=("$arg")
 done
 
-echo "[uhpc-salloc] Requesting a Slurm allocation for 1 node, partition=$PARTITION, time=$TIME ..."
-ALLOCATION_OUTPUT=$(salloc -N1 -p "$PARTITION" -t "$TIME" --no-shell 2>&1)
+# If user didn't specify partition, add the default
+if ! $PARTITION_SPECIFIED; then
+  EXTRA_ARGS+=( "--partition=$DEFAULT_PARTITION" )
+fi
+
+# If user didn't specify time, add the default
+if ! $TIME_SPECIFIED; then
+  EXTRA_ARGS+=( "--time=$DEFAULT_TIME" )
+fi
+
+echo "[uhpc-salloc] Requesting a Slurm allocation (1 node)."
+echo "[uhpc-salloc] NUM_SHELLS=$NUM_SHELLS"
+echo "[uhpc-salloc] Forwarding extra Slurm options: ${EXTRA_ARGS[@]}"
+
+# Request the allocation with --no-shell + forced -N1
+ALLOCATION_OUTPUT=$(salloc --no-shell -N1 "${EXTRA_ARGS[@]}" 2>&1)
 
 JOBID=$(echo "$ALLOCATION_OUTPUT" | grep "Granted job allocation" | awk '{print $4}')
 if [ -z "$JOBID" ]; then
@@ -49,9 +74,8 @@ fi
 echo "[uhpc-salloc] Successfully allocated job=$JOBID"
 echo "[uhpc-salloc] Spawning $NUM_SHELLS shells..."
 
-# We spawn multiple "interactive" steps. Each is a bash that just sits.
+# Spawn multiple "interactive" steps. Each is a bash that just waits.
 # We run them in the background, ignoring standard I/O for now.
-# The job stays alive as long as these steps are running.
 for i in $(seq 1 "$NUM_SHELLS"); do
   STEP_NAME="shell$i"
   srun --jobid="$JOBID" --ntasks=1 -d singleton \
@@ -68,17 +92,17 @@ To attach to one of them, run e.g.:
   uhpc-login $JOBID 2   # attach to "shell2"
 ... etc.
 
-Once attached, you can run commands in that shell. When you are done with *all* shells, run:
+Once attached, you can run commands in that shell.
+To "log off" but keep the shell alive, run 'uhpc-logoff' inside the attached shell.
+Finally, when you are done with *all* shells, run:
   uhpc-unalloc $JOBID
 
 This script will now background itself so you can close this terminal or log out,
 and the allocation remains active.
 EOF
 
-# Instead of sleeping in foreground, we do a "self-background" trick:
+# Instead of sleeping in foreground, do a "self-background" trick:
 (
-  # We'll just sleep forever so that salloc doesn't terminate,
-  # but we do it in a subshell, in the background, with no output.
   nohup bash -c "while true; do sleep 3600; done" >/dev/null 2>&1 &
 ) &
 
